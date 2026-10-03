@@ -433,6 +433,19 @@ html.anim.ready .top-nav a:nth-child(1){animation-delay:.35s}html.anim.ready .to
 .card.open .card-in{visibility:visible;opacity:1;transition:opacity .55s .15s,visibility 0s}
 .fb-in{transition:box-shadow .25s,transform .25s}.fb-in:focus{outline:0;box-shadow:0 0 0 3px rgba(255,255,255,.75);transform:translateY(-1px)}
 .fb-msg.pop{animation:pop .6s cubic-bezier(.2,.9,.3,1.3)}
+/* review photos: small thumbnails on the card, tap to open full size */
+.rv-top{display:flex;align-items:flex-start;justify-content:space-between;gap:.6rem}
+.rv-top .st{margin-bottom:0}
+.rv-photos{display:flex;gap:.4rem;margin-left:auto;flex-wrap:wrap;justify-content:flex-end}
+.rv-photos button{width:2.9rem;height:2.9rem;border:1px solid rgba(255,255,255,.4);border-radius:10px;padding:0;overflow:hidden;background:rgba(255,255,255,.12);cursor:zoom-in;-webkit-tap-highlight-color:transparent}
+.rv-photos img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
+.lb{position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0);animation:lbIn .2s ease}
+@keyframes lbIn{from{opacity:0}to{opacity:1}}
+.lb img{max-width:94vw;max-height:88vh;object-fit:contain;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6)}
+.lb button{position:absolute;border:0;border-radius:50%;width:2.8rem;height:2.8rem;background:rgba(255,255,255,.18);color:#fff;font:400 1.6rem/2.8rem system-ui;cursor:pointer;padding:0}
+.lb .lb-x{top:calc(env(safe-area-inset-top,0px) + .8rem);right:.8rem}
+.lb .lb-p{left:.6rem;top:50%;transform:translateY(-50%)}
+.lb .lb-n{right:.6rem;top:50%;transform:translateY(-50%)}
 .review.rv-new{animation:rvNew .9s cubic-bezier(.2,.9,.3,1.15) backwards!important}
 @keyframes rvNew{from{opacity:0;transform:translateX(-50px) scale(.85)}to{opacity:1;transform:none}}
 </style>
@@ -898,10 +911,37 @@ var FLEET=[
 
   /* ---- reviews (newest visitor comments first, built with textContent so nothing can inject HTML) ---- */
   var rv=$('reviews');
+  function openLightbox(urls,start){
+    var i=start,o=d.createElement('div');o.className='lb';o.setAttribute('role','dialog');o.setAttribute('aria-modal','true');
+    var im=d.createElement('img');im.alt='';
+    function show(){im.src=urls[i]}
+    function close(){o.remove();d.removeEventListener('keydown',key)}
+    function go(n){i=(i+n+urls.length)%urls.length;show()}
+    function key(e){if(e.key==='Escape')close();else if(e.key==='ArrowLeft'&&urls.length>1)go(-1);else if(e.key==='ArrowRight'&&urls.length>1)go(1)}
+    function btn(c,t,l,fn){var b=d.createElement('button');b.type='button';b.className=c;b.textContent=t;b.setAttribute('aria-label',l);b.addEventListener('click',function(e){e.stopPropagation();fn()});return b}
+    o.append(im,btn('lb-x','\u00d7','Close',close));
+    if(urls.length>1)o.append(btn('lb-p','\u2039','Previous',function(){go(-1)}),btn('lb-n','\u203a','Next',function(){go(1)}));
+    o.addEventListener('click',close);d.addEventListener('keydown',key);
+    d.body.append(o);show();
+  }
+  /* photo urls: server keys (reviews/<id>/<n>.webp) become backend links; blob:/http urls pass through */
+  function photoUrl(k){return /^(blob:|https?:)/.test(k)?k:BACKEND+'/api/rating-photo/'+k}
   function card(r){
     var f=d.createElement('figure');f.className='review';
-    if(r.rating){var st=d.createElement('div');st.className='st';st.setAttribute('aria-label',T('home.starsOutOfFiveAria',{n:r.rating}));st.textContent='★'.repeat(r.rating)+'☆'.repeat(5-r.rating);f.append(st)}
-    var q=d.createElement('blockquote');q.textContent=r.comment;
+    var urls=(Array.isArray(r.photos)?r.photos:[]).slice(0,3).map(photoUrl);
+    var top=d.createElement('div');top.className='rv-top';
+    if(r.rating){var st=d.createElement('div');st.className='st';st.setAttribute('aria-label',T('home.starsOutOfFiveAria',{n:r.rating}));st.textContent='★'.repeat(r.rating)+'☆'.repeat(5-r.rating);top.append(st)}
+    if(urls.length){
+      var ph=d.createElement('div');ph.className='rv-photos';
+      urls.forEach(function(u,n){
+        var b=d.createElement('button');b.type='button';b.setAttribute('aria-label','View photo '+(n+1));
+        var im=d.createElement('img');im.src=u;im.alt='';im.loading='lazy';im.decoding='async';
+        b.append(im);b.addEventListener('click',function(){openLightbox(urls,n)});ph.append(b);
+      });
+      top.append(ph);
+    }
+    if(top.childNodes.length)f.append(top);
+    var q=d.createElement('blockquote');q.textContent=r.comment||'';
     var c=d.createElement('cite');c.textContent='— '+(r.name||T('home.defaultReviewer'));
     var box=d.createElement('div');box.append(q);
     f.append(box,c);return f;
@@ -913,7 +953,7 @@ var FLEET=[
     rv.scrollLeft=0;
   }
   var BACKEND=((TEXT.backend&&TEXT.backend.url)||'').replace(/\/+$/,'');
-  fetch(BACKEND+'/api/ratings?site=website-b').then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(j){var l=(j.ratings||[]).filter(function(r){return r.comment});if(l.length)showReviews(l)}).catch(function(){});
+  fetch(BACKEND+'/api/ratings?site=website-b').then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(j){var l=(j.ratings||[]).filter(function(r){return r.comment||(r.photos&&r.photos.length)});if(l.length)showReviews(l)}).catch(function(){});
   dragScroll(rv);
   function step(dir){var c=rv.querySelector('.review'),gap=parseFloat(getComputedStyle(rv).columnGap)||16;rv.scrollBy({left:dir*(c.offsetWidth+gap),behavior:beh})}
   $('rvPrev').addEventListener('click',function(){step(-1)});
@@ -958,7 +998,7 @@ var FLEET=[
     if(!rating){msg.textContent=T('home.tapStarFirst');return}
     var body={site:'website-b',rating:rating,name:$('fbName').value.trim(),comment:txt.value.trim(),website:$('fbWeb').value};
     btn.disabled=true;btn.textContent=T('home.sending');
-    var req;
+    var req,sentPhotos=photos.map(function(p){return p.url});
     if(photos.length){          /* with pictures: multipart (the server accepts up to 3, 2 MB each) */
       var fd=new FormData();fd.append('site',body.site);fd.append('rating',body.rating);fd.append('name',body.name);fd.append('comment',body.comment);
       photos.forEach(function(p,i){fd.append('photos',p.blob,'photo'+(i+1)+'.webp')});
@@ -967,8 +1007,8 @@ var FLEET=[
     fetch(BACKEND+'/api/ratings',req)
       .then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.message||j.error||'');return j})})
       .then(function(){
-        if(body.comment){
-          var nc=card({rating:body.rating,name:body.name,comment:body.comment});nc.classList.add('rv-new');rv.insertBefore(nc,rv.firstChild);
+        if(body.comment||sentPhotos.length){
+          var nc=card({rating:body.rating,name:body.name,comment:body.comment,photos:sentPhotos});nc.classList.add('rv-new');rv.insertBefore(nc,rv.firstChild);
           rv.scrollTo({left:0,behavior:beh});
           msg.textContent=T('home.thanksWithComment');
         } else msg.textContent=T('home.thanksNoComment');
